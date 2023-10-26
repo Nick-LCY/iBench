@@ -35,77 +35,69 @@
 
 
 unsigned long int getNs() {
-	struct timespec ts;
-	clock_gettime(CLOCK_REALTIME, &ts);
-	return ts.tv_sec*NS_PER_S + ts.tv_nsec;
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        return ts.tv_sec*NS_PER_S + ts.tv_nsec;
 }
 
 void remove_all_chars(char* str, char c) {
-	char *pr = str, *pw = str;
-	while (*pr) {
-		*pw = *pr++;
-		pw += (*pw != c);
-	}
-	*pw = '\0';
+        char *pr = str, *pw = str;
+        while (*pr) {
+                *pw = *pr++;
+                pw += (*pw != c);
+        }
+        *pw = '\0';
 }
 
-long long int memory_size_kb(void) {
-	char line[512];
-	long long int column;
-	FILE *meminfo;
+long long int memory_size_kb_cgroup(void) {
+        char line[512];
+        long long int column;
+        FILE *meminfo;
 
 	if (!(meminfo = fopen("/sys/fs/cgroup/memory.max", "r"))) {
 		perror("/sys/fs/cgroup/memory.max: fopen");
 		if (!(meminfo = fopen("/sys/fs/cgroup/memory/memory.limit_in_bytes", "r"))) {
 			perror("/sys/fs/cgroup/memory/memory.limit_in_bytes: fopen");
-			if (!(meminfo = fopen("/proc/meminfo", "r"))) {
-				perror("/proc/meminfo: fopen");
-				return -1;
-			}
-			while (fgets(line, sizeof(line), meminfo)) {
-				if (strstr(line, "MemTotal")) {
-					char* colStr;
-					colStr = strstr(line, ":");
-					remove_all_chars(colStr, ':'); 
-					remove_all_chars(colStr, 'k'); 
-					remove_all_chars(colStr, 'B');
-					remove_all_chars(colStr, ' ');
-					column = atoi(colStr);
-					column = 1000*column;	
-					fclose(meminfo);
-					return column; 
-				}
-			}
-		}
-	}
+                        return -1;
+                }
+        }
 
-	fgets(line, sizeof(line), meminfo);
-	column = atoll(line);
-	fclose(meminfo);
-	return column;
+        while (fgets(line, sizeof(line), meminfo)) {
+                column = atoll(line);
+                fclose(meminfo);
+                return column;
+        }
+        fclose(meminfo);
+        return -1;
 }
 
 int main(int argc, char **argv) {
-	struct timespec sleepValue = {0};
+        char* volatile block;
+        long long int MEMORY_SIZE = memory_size_kb_cgroup(); 
+        printf("Total Memory Size: %llu\n", MEMORY_SIZE);
 
-	char* volatile block;
-	long long int MEMORY_SIZE = memory_size_kb(); 
-	printf("Total Memory Size: %llu\n", MEMORY_SIZE);
+        /*Usage: ./memCap <duration in sec>*/
+        if (argc < 2) { 
+                printf("Usage: ./cap_mem <duration in sec>\n"); 
+                exit(0); 
+        }
+        block = (char*)mmap(NULL, MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
 
-	/*Usage: ./memCap <duration in sec>*/
-	if (argc < 2) { 
-		printf("Usage: ./cap_mem <duration in sec>\n"); 
-		exit(0); 
-	}	
-	block = (char*)mmap(NULL, MEMORY_SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0);
+        int usr_timer = atoi(argv[1]);
+        int sleepTime = atoi(argv[2]);
+        double time_spent = 0.0; 
+        clock_t begin, end;
 
-	int usr_timer = atoi(argv[1]);
-
-	int capacity;
-	// To avoid OOM, only occupy 95% of RAM
-	capacity = (int) MEMORY_SIZE * 0.95;
-	memcpy(block, block+1, capacity);
-	sleep(usr_timer);
-	return 0;
+        while (time_spent < usr_timer) {
+                begin = clock();
+                memcpy(block, block + 1, MEMORY_SIZE - 12741824);
+                // sleepValue.tv_nsec = 10;
+                // printf("Sleep %llu second\n", sleepValue.tv_nsec);
+                // nanosleep(&sleepValue, NULL);
+                // sleep(sleepTime);
+                usleep(sleepTime);
+                end = clock();
+                time_spent += (double)(end - begin) / CLOCKS_PER_SEC;
+        }
+        return 0;
 }
-
